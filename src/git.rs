@@ -38,7 +38,7 @@ pub fn current_branch() -> Result<String> {
 
 pub fn head_commit() -> Result<String> {
     let output = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
+        .args(["rev-parse", "HEAD"])
         .output()
         .context("failed to get HEAD commit")?;
 
