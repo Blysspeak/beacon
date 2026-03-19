@@ -4,36 +4,36 @@ use std::path::PathBuf;
 
 const HOOK_SCRIPT: &str = r#"#!/bin/sh
 # Beacon deploy monitor hook for Claude Code
-# PostToolUse on Bash: checks mailbox + starts monitoring after git push
-
+# Triggers on any Bash command containing "git push"
 HOOK_INPUT=$(cat)
 TOOL_INPUT=$(echo "$HOOK_INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
-
 command -v beacon >/dev/null 2>&1 || exit 0
 
-# --- Mailbox check: report completed deploys ---
+# Check mailbox for failed deploys
 STATUS_JSON=$(beacon status --json 2>/dev/null)
 if [ -n "$STATUS_JSON" ] && [ "$STATUS_JSON" != "null" ]; then
     STATUS=$(echo "$STATUS_JSON" | jq -r '.status // empty' 2>/dev/null)
-    REPO=$(echo "$STATUS_JSON" | jq -r '.repo // empty' 2>/dev/null)
+    REPO_NAME=$(echo "$STATUS_JSON" | jq -r '.repo // empty' 2>/dev/null)
     BRANCH=$(echo "$STATUS_JSON" | jq -r '.branch // empty' 2>/dev/null)
-
     case "$STATUS" in
-        failed)
-            echo "DEPLOY FAILED: $REPO ($BRANCH). Run 'beacon status' for details. Fix the issue before continuing."
-            ;;
+        failed) echo "DEPLOY FAILED: $REPO_NAME ($BRANCH). Run beacon status for details." ;;
     esac
 fi
 
-# --- Start monitoring after git push ---
+# Start monitoring if command contains "git push" ANYWHERE
+# Handles: "git push", "cd foo && git push 2>&1", etc.
 case "$TOOL_INPUT" in
-    git\ push*|git\ push)
-        git remote get-url origin >/dev/null 2>&1 || exit 0
-        beacon watch --daemon 2>/dev/null || true
-        echo "Beacon: deploy monitoring started in background"
+    *git\ push*)
+        WORK_DIR=$(echo "$TOOL_INPUT" | sed -n 's/.*cd \([^ &;]*\).*/\1/p' | head -1)
+        if [ -n "$WORK_DIR" ] && [ -d "$WORK_DIR" ]; then
+            (cd "$WORK_DIR" && beacon watch --daemon 2>/dev/null) \
+                && echo "Beacon: monitoring deploy" || true
+        else
+            beacon watch --daemon 2>/dev/null \
+                && echo "Beacon: monitoring deploy" || true
+        fi
         ;;
 esac
-
 exit 0
 "#;
 

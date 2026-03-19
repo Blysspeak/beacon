@@ -295,7 +295,13 @@ if [ -n "$STATUS_JSON" ] && [ "$STATUS_JSON" != "null" ]; then
 fi
 
 case "$TOOL_INPUT" in
-    git\ push*) beacon watch --daemon 2>/dev/null && echo "Beacon: deploy monitoring started" || true ;;
+    *git\ push*)
+        WORK_DIR=$(echo "$TOOL_INPUT" | sed -n '"'"'s/.*cd \([^ &;]*\).*/\1/p'"'"' | head -1)
+        if [ -n "$WORK_DIR" ] && [ -d "$WORK_DIR" ]; then
+            (cd "$WORK_DIR" && beacon watch --daemon 2>/dev/null) && echo "Beacon: monitoring deploy" || true
+        else
+            beacon watch --daemon 2>/dev/null && echo "Beacon: monitoring deploy" || true
+        fi ;;
 esac
 exit 0'
 
