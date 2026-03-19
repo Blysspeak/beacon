@@ -69,6 +69,19 @@ pub async fn watch(
 }
 
 pub fn daemonize() -> Result<()> {
+    let beacon_dir = crate::config::beacon_dir()?;
+    let pid_path = beacon_dir.join("watcher.pid");
+
+    // Kill previous daemon if running
+    if pid_path.exists() {
+        if let Ok(old_pid) = std::fs::read_to_string(&pid_path) {
+            if let Ok(pid) = old_pid.trim().parse::<i32>() {
+                // Send SIGTERM to old daemon
+                kill_process(pid);
+            }
+        }
+    }
+
     let exe = std::env::current_exe()?;
 
     // Re-run ourselves without --daemon to get foreground watch
@@ -78,18 +91,21 @@ pub fn daemonize() -> Result<()> {
     let child = std::process::Command::new(exe)
         .args(&args)
         .stdout(std::process::Stdio::null())
-        .stderr(std::fs::File::create(
-            crate::config::beacon_dir()?.join("daemon.log"),
-        )?)
+        .stderr(std::fs::File::create(beacon_dir.join("daemon.log"))?)
         .stdin(std::process::Stdio::null())
         .spawn()?;
 
     let pid = child.id();
-    let pid_path = crate::config::beacon_dir()?.join("watcher.pid");
     std::fs::write(&pid_path, pid.to_string())?;
 
     println!("  Background watcher started (PID {pid})");
     println!("  Logs: ~/.beacon/daemon.log");
 
     Ok(())
+}
+
+fn kill_process(pid: i32) {
+    let _ = std::process::Command::new("kill")
+        .arg(pid.to_string())
+        .output();
 }
