@@ -380,7 +380,7 @@ EOF
 
 setup_telegram() {
     echo ""
-    echo "  ${GREEN}│${RESET} Open ${BOLD}@BeaconCIBot${RESET} in Telegram"
+    echo "  ${GREEN}│${RESET} Open ${BOLD}@beacon_github_bot${RESET} in Telegram"
     echo "  ${GREEN}│${RESET} Press ${BOLD}/start${RESET} to get your token"
     echo "  ${GREEN}│${RESET} It looks like: ${DIM}xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx${RESET}"
     echo ""
@@ -399,9 +399,9 @@ setup_telegram() {
                 ;;
         esac
 
-        # Validate UUID format (8-4-4-4-12)
+        # Basic validation: non-empty, contains dashes (looks like UUID)
         case "$TOKEN" in
-            ????????-????-????-????-????????????)
+            *-*-*-*-*)
                 break
                 ;;
             *)
@@ -411,8 +411,8 @@ setup_telegram() {
                     dim "Connect later: beacon remote connect <TOKEN>"
                     return
                 fi
-                error "Invalid token format. Expected UUID like: ${DIM}xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx${RESET}"
-                dim "Get it from /start in @BeaconCIBot"
+                error "That doesn't look like a token from the bot"
+                dim "Get it from /start in @beacon_github_bot"
                 echo ""
                 ;;
         esac
