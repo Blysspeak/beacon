@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-19
+
+### Added
+
+- `beacon install` — auto-setup Claude Code PostToolUse hooks
+- `beacon uninstall` — remove Claude Code hooks
+- Interactive `install.sh` wizard with ASCII logo banner
+  - Auto-detects platform (Linux/macOS, x86_64/ARM64, glibc/musl)
+  - Downloads latest release from GitHub or builds from source
+  - Auto-adds to PATH with shell detection (bash/zsh/fish)
+  - Claude Code hook setup with Y/n prompt
+  - Telegram connection with token validation and test
+- Claude Code hook: auto-monitors deploy after `git push`, warns on failures
+- GitHub Actions CI workflow for multi-platform release builds
+- Production API URL: `beacon.blysspeak.space`
+
+### Changed
+
+- Default API URL changed from placeholder to `https://beacon.blysspeak.space`
+- Token validation: empty tokens rejected with helpful error
+- Install binary strategy: always fetch latest from GitHub first, fallback to source build
+
 ## [0.1.0] - 2026-03-19
 
 ### Added
