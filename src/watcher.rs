@@ -9,6 +9,7 @@ const PHASE1_INTERVAL: Duration = Duration::from_secs(5);
 const PHASE1_DURATION: Duration = Duration::from_secs(120);
 const PHASE2_INTERVAL: Duration = Duration::from_secs(15);
 const MAX_DURATION: Duration = Duration::from_secs(30 * 60);
+const NOT_FOUND_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub async fn watch(
     provider: impl Provider,
@@ -31,13 +32,24 @@ pub async fn watch(
 
         match provider.get_run_status(repo, branch, commit).await {
             Ok(status) => {
-                mailbox::write(&status)?;
+                // Don't overwrite a terminal result (success/failed) with not_found
+                // This prevents a push to repo-without-CI from erasing the last real result
+                if status.status != crate::providers::Status::NotFound {
+                    mailbox::write(&status)?;
+                }
                 output::print_progress(&status, elapsed);
 
                 if status.is_terminal() {
                     eprint!("\r{}\r", " ".repeat(80));
                     output::print_status(&status);
                     return Ok(status);
+                }
+
+                // Give up if no workflow run found after 2 minutes (repo has no CI)
+                if status.status == crate::providers::Status::NotFound
+                    && start.elapsed() > NOT_FOUND_TIMEOUT
+                {
+                    return Ok(last_status);
                 }
 
                 last_status = status;
