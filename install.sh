@@ -219,47 +219,65 @@ build_from_source() {
 install_binary() {
     try_exec mkdir -p "$INSTALL_DIR" || die "Cannot create ${INSTALL_DIR}"
 
-    # Check if already installed with same version
+    # Check if already installed
     if command -v "$BINARY" >/dev/null 2>&1; then
         EXISTING=$("$BINARY" --version 2>/dev/null | head -1)
         info "Found existing: ${DIM}${EXISTING}${RESET}"
     fi
 
-    if [ -f "Cargo.toml" ] && [ -f "target/release/$BINARY" ]; then
-        BIN_SOURCE="target/release/$BINARY"
-    elif [ -f "Cargo.toml" ]; then
-        build_from_source
-        BIN_SOURCE="target/release/$BINARY"
-    else
-        info "Downloading pre-built binary..."
+    BIN_SOURCE=""
 
-        if [ "$VERSION" = "latest" ]; then
-            VERSION=$(download "https://api.github.com/repos/${REPO}/releases/latest" - 2>/dev/null \
-                | grep '"tag_name"' | head -1 \
-                | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-            [ -z "$VERSION" ] && die "Failed to fetch latest version"
-        fi
+    # Strategy 1: Try downloading latest release from GitHub
+    info "Fetching latest release from GitHub..."
 
+    if [ "$VERSION" = "latest" ]; then
+        VERSION=$(download "https://api.github.com/repos/${REPO}/releases/latest" - 2>/dev/null \
+            | grep '"tag_name"' | head -1 \
+            | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+    fi
+
+    if [ -n "$VERSION" ]; then
         ARCHIVE="${BINARY}-${VERSION}-${TARGET}.tar.gz"
         URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE}"
 
         TMP_DIR=$(mktemp -d)
         trap 'rm -rf "$TMP_DIR"' EXIT
 
-        download "$URL" "$TMP_DIR/$ARCHIVE" \
-            || die "Download failed for ${TARGET}"
+        if download "$URL" "$TMP_DIR/$ARCHIVE" 2>/dev/null; then
+            tar -xzf "$TMP_DIR/$ARCHIVE" -C "$TMP_DIR" 2>/dev/null
+            BIN_SOURCE=$(find "$TMP_DIR" -name "$BINARY" -type f | head -1)
 
-        tar -xzf "$TMP_DIR/$ARCHIVE" -C "$TMP_DIR"
-        BIN_SOURCE=$(find "$TMP_DIR" -name "$BINARY" -type f | head -1)
-        [ -z "$BIN_SOURCE" ] && die "Binary not found in archive"
+            if [ -n "$BIN_SOURCE" ]; then
+                success "Downloaded ${BOLD}${VERSION}${RESET}"
+            else
+                warn "Archive downloaded but binary not found inside"
+                BIN_SOURCE=""
+            fi
+        else
+            warn "No pre-built binary for ${BOLD}${TARGET}${RESET}"
+        fi
+    else
+        warn "No releases found on GitHub"
     fi
 
+    # Strategy 2: Build from source (fallback)
+    if [ -z "$BIN_SOURCE" ]; then
+        if [ -f "Cargo.toml" ]; then
+            info "Falling back to build from source..."
+            build_from_source
+            BIN_SOURCE="target/release/$BINARY"
+        else
+            die "No binary available and not in source directory. Clone the repo first:\n  git clone https://github.com/${REPO} && cd beacon && bash install.sh"
+        fi
+    fi
+
+    # Install
     chmod +x "$BIN_SOURCE"
     try_exec /usr/bin/cp "$BIN_SOURCE" "$INSTALL_DIR/$BINARY"
 
     if "$INSTALL_DIR/$BINARY" --version >/dev/null 2>&1; then
         INSTALLED_VERSION=$("$INSTALL_DIR/$BINARY" --version 2>/dev/null | head -1)
-        success "${BOLD}${INSTALLED_VERSION}${RESET} installed"
+        success "${BOLD}${INSTALLED_VERSION}${RESET} installed to ${INSTALL_DIR}/"
     else
         success "Installed to ${INSTALL_DIR}/${BINARY}"
     fi
