@@ -1,0 +1,15 @@
+{
+  "identifier": "default",
+  "description": "Beacon GUI permissions",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [
+        { "path": "$HOME/.beacon/**" }
+      ]
+    },
+    "shell:allow-open"
+  ]
+}
