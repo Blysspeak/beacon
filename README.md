@@ -137,14 +137,39 @@ cat contrib/waybar/style.css >> ~/.config/waybar/style.css
 
 Click the widget to open the GitHub Actions run in browser.
 
-## How It Works
+## Architecture
 
-1. **Auto-detect** — parses `git remote` to find your GitHub repo
-2. **Token resolution** — uses `GITHUB_TOKEN` env or `gh auth token`
-3. **Adaptive polling** — 5s intervals for first 2 min, then 15s, max 30 min
-4. **Local mailbox** — results saved to `~/.beacon/last_deploy.json`
-5. **Remote notifications** — sends to Beacon Bot API → Telegram
-6. **Waybar signal** — sends `SIGRTMIN+8` to waybar for instant widget refresh
+Beacon runs as a **persistent systemd daemon** (like TimeForged). One process, always running.
+
+```
+                     ┌──────────────────────────┐
+                     │   beacon daemon (systemd) │
+                     │   polls ~/.beacon/queue/   │
+                     └─────────┬────────────────┘
+                               │
+        ┌──────────────────────┼──────────────────────┐
+        ↓                      ↓                      ↓
+   mailbox::write()    telegram::send()    pkill SIGRTMIN+8
+   ~/.beacon/          POST /notify        waybar refresh
+   last_deploy.json    → Telegram 📱       instant update
+```
+
+**Push sources** (all write to `~/.beacon/queue/`):
+- Claude Code hook → `beacon notify` (< 10ms, just writes a file)
+- `beacon push` → `git push` + `beacon notify`
+- Manual → `beacon notify` from any terminal
+
+**Deploy tracking:**
+1. Daemon picks up queue event → polls GitHub Actions
+2. On completion → writes mailbox + sends Telegram + signals waybar
+3. If deploy **failed** → Claude Code sees warning before next action (PreToolUse hook)
+
+```bash
+# Daemon management
+systemctl --user status beacon     # check status
+journalctl --user -u beacon -f     # live logs
+systemctl --user restart beacon    # restart
+```
 
 ## Configuration
 

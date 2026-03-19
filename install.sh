@@ -86,11 +86,13 @@ show_complete() {
     echo ""
     echo "  ${BOLD}Quick start:${RESET}"
     echo ""
-    echo "    ${GREEN}\$${RESET} ${BOLD}beacon push${RESET}              ${DIM}git push + monitor deploy${RESET}"
-    echo "    ${GREEN}\$${RESET} ${BOLD}beacon watch${RESET}             ${DIM}monitor current deploy${RESET}"
+    echo "    ${GREEN}\$${RESET} ${BOLD}beacon push${RESET}              ${DIM}git push + auto-monitor${RESET}"
     echo "    ${GREEN}\$${RESET} ${BOLD}beacon status${RESET}            ${DIM}last deploy result${RESET}"
+    echo "    ${GREEN}\$${RESET} ${BOLD}beacon watch${RESET}             ${DIM}manual foreground monitor${RESET}"
     echo "    ${GREEN}\$${RESET} ${BOLD}beacon remote connect${RESET}    ${DIM}Telegram alerts${RESET}"
-    echo "    ${GREEN}\$${RESET} ${BOLD}beacon install${RESET}           ${DIM}re-setup Claude Code hooks${RESET}"
+    echo ""
+    echo "  ${DIM}Daemon: systemctl --user status beacon${RESET}"
+    echo "  ${DIM}Logs:   journalctl --user -u beacon -f${RESET}"
     echo ""
     echo "  ${DIM}Docs: https://github.com/Blysspeak/beacon${RESET}"
     echo ""
@@ -273,6 +275,57 @@ install_binary() {
         success "${BOLD}${INSTALLED_VERSION}${RESET} installed to ${INSTALL_DIR}/"
     else
         success "Installed to ${INSTALL_DIR}/${BINARY}"
+    fi
+}
+
+# --- Daemon (systemd) ---
+
+setup_daemon() {
+    # Check if systemd user services are available
+    if ! command -v systemctl >/dev/null 2>&1; then
+        warn "systemctl not found"
+        dim "Run daemon manually: beacon daemon &"
+        return
+    fi
+
+    if ! systemctl --user status >/dev/null 2>&1; then
+        warn "systemd user services not available"
+        dim "Run daemon manually: beacon daemon &"
+        return
+    fi
+
+    SERVICE_DIR="$HOME/.config/systemd/user"
+    SERVICE_PATH="$SERVICE_DIR/beacon.service"
+    mkdir -p "$SERVICE_DIR"
+
+    # Write service file
+    cat > "$SERVICE_PATH" << SVCEOF
+[Unit]
+Description=Beacon — CI/CD deploy monitor daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${INSTALL_DIR}/beacon daemon
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+SVCEOF
+
+    # Enable and start
+    systemctl --user daemon-reload 2>/dev/null
+    systemctl --user enable --now beacon.service 2>/dev/null
+
+    if systemctl --user is-active beacon.service >/dev/null 2>&1; then
+        success "Daemon running (systemd)"
+        dim "  Persistent — auto-restarts on failure"
+        dim "  Logs: journalctl --user -u beacon -f"
+    else
+        warn "Daemon failed to start"
+        dim "Check: systemctl --user status beacon"
+        dim "Or run manually: beacon daemon"
     fi
 }
 
@@ -569,7 +622,7 @@ main() {
     show_banner
 
     # ── Step 1: Install ──
-    step "1/5" "Install binary"
+    step "1/6" "Install binary"
 
     detect_platform
     detect_install_dir
@@ -579,17 +632,24 @@ main() {
     # ── PATH ──
     check_path
 
-    # ── Step 2: Claude Code ──
-    step "2/5" "Claude Code integration"
+    # ── Step 2: Daemon ──
+    step "2/6" "Background daemon"
+
+    setup_daemon
+
+    # ── Step 3: Claude Code ──
+    step "3/6" "Claude Code integration"
 
     if ask_yn "Set up Claude Code hooks?" "y"; then
         setup_claude_hooks || true
+        dim "  PreToolUse: warns Claude if deploy is broken"
+        dim "  PostToolUse: auto-enqueues push for monitoring"
     else
         dim "Skip. Run later: beacon install"
     fi
 
-    # ── Step 3: Telegram ──
-    step "3/5" "Telegram notifications"
+    # ── Step 4: Telegram ──
+    step "4/6" "Telegram notifications"
 
     if ask_yn "Connect Telegram?" "y"; then
         setup_telegram
@@ -597,8 +657,8 @@ main() {
         dim "Skip. Run later: beacon remote connect <TOKEN>"
     fi
 
-    # ── Step 4: Waybar (optional) ──
-    step "4/5" "Waybar widget (optional)"
+    # ── Step 5: Waybar (optional) ──
+    step "5/6" "Waybar widget (optional)"
 
     if command -v waybar >/dev/null 2>&1 && [ -d "$HOME/.config/waybar" ]; then
         info "Waybar detected"
@@ -612,7 +672,7 @@ main() {
     fi
 
     # ── Done ──
-    step "5/5" "Complete"
+    step "6/6" "Complete"
     show_complete
 }
 

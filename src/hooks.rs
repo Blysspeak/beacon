@@ -227,10 +227,20 @@ fn update_settings(settings_path: &PathBuf, hook_path: &PathBuf) -> Result<()> {
     if settings.get("hooks").is_none() {
         settings["hooks"] = serde_json::json!({});
     }
+
+    // PreToolUse: warn Claude about failed deploys before each action
+    if settings["hooks"].get("PreToolUse").is_none() {
+        settings["hooks"]["PreToolUse"] = serde_json::json!([]);
+    }
+    settings["hooks"]["PreToolUse"]
+        .as_array_mut()
+        .unwrap()
+        .push(hook_entry.clone());
+
+    // PostToolUse: enqueue push events for daemon
     if settings["hooks"].get("PostToolUse").is_none() {
         settings["hooks"]["PostToolUse"] = serde_json::json!([]);
     }
-
     settings["hooks"]["PostToolUse"]
         .as_array_mut()
         .unwrap()
@@ -241,7 +251,7 @@ fn update_settings(settings_path: &PathBuf, hook_path: &PathBuf) -> Result<()> {
     fs::write(&tmp, &json).context("failed to write settings")?;
     fs::rename(&tmp, settings_path).context("failed to save settings")?;
 
-    println!("  Hook added to settings.json");
+    println!("  Hooks added to settings.json (PreToolUse + PostToolUse)");
 
     Ok(())
 }
