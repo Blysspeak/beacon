@@ -1,9 +1,11 @@
 mod config;
+mod daemon;
 mod git;
 mod hooks;
 mod mailbox;
 mod output;
 mod providers;
+mod queue;
 mod telegram;
 mod watcher;
 
@@ -25,12 +27,26 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Watch deploy status after push (foreground by default)
-    Watch {
-        /// Run in background as daemon
+    /// Run persistent daemon (for systemd — watches queue, tracks deploys)
+    Daemon,
+
+    /// Notify daemon of a new push (writes to queue, exits immediately)
+    Notify {
+        /// Repository in owner/repo format (auto-detected from git if omitted)
         #[arg(long)]
-        daemon: bool,
+        repo: Option<String>,
+
+        /// Branch name (auto-detected if omitted)
+        #[arg(long)]
+        branch: Option<String>,
+
+        /// Full commit SHA (auto-detected if omitted)
+        #[arg(long)]
+        commit: Option<String>,
     },
+
+    /// Watch deploy status in foreground (manual use, not for hooks)
+    Watch,
 
     /// Show last deploy status from mailbox
     Status {
@@ -39,7 +55,7 @@ enum Commands {
         json: bool,
     },
 
-    /// Git push + auto-watch deploy
+    /// Git push + notify daemon to track deploy
     Push {
         /// Arguments forwarded to git push
         #[arg(trailing_var_arg = true)]
@@ -52,10 +68,10 @@ enum Commands {
         action: RemoteAction,
     },
 
-    /// Install Claude Code hooks for automatic deploy monitoring
+    /// Install Claude Code hooks and systemd service
     Install,
 
-    /// Remove Claude Code hooks
+    /// Remove Claude Code hooks and systemd service
     Uninstall,
 }
 
@@ -63,7 +79,7 @@ enum Commands {
 enum RemoteAction {
     /// Connect to Beacon bot (get token from /start in Telegram)
     Connect {
-        /// API token from /start in @BeaconCIBot
+        /// API token from /start in @beacon_github_bot
         token: String,
 
         /// Custom API server URL
@@ -83,12 +99,27 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Watch { daemon } => {
-            if daemon {
-                watcher::daemonize()?;
-            } else {
-                do_watch().await?;
-            }
+        Commands::Daemon => {
+            daemon::run().await?;
+        }
+        Commands::Notify { repo, branch, commit } => {
+            let repo = match repo {
+                Some(r) => r,
+                None => git::detect_repo()?.full_name(),
+            };
+            let branch = match branch {
+                Some(b) => b,
+                None => git::current_branch()?,
+            };
+            let commit = match commit {
+                Some(c) => c,
+                None => git::head_commit()?,
+            };
+
+            queue::enqueue(&repo, &branch, &commit)?;
+        }
+        Commands::Watch => {
+            do_watch().await?;
         }
         Commands::Status { json } => {
             match mailbox::read_last()? {
@@ -120,17 +151,24 @@ async fn main() -> Result<()> {
                 anyhow::bail!("git push failed (exit {})", exit);
             }
 
-            do_watch().await?;
+            // Enqueue for daemon instead of spawning a new process
+            let repo = git::detect_repo()?;
+            let branch = git::current_branch()?;
+            let commit = git::head_commit()?;
+            queue::enqueue(&repo.full_name(), &branch, &commit)?;
+            println!("  Queued for monitoring.");
         }
         Commands::Remote { action } => handle_remote(action).await?,
         Commands::Install => {
-            println!("\n  Setting up Claude Code integration...\n");
+            println!("\n  Setting up Beacon...\n");
             hooks::install_claude_hook()?;
-            println!("\n  Done! Beacon will now auto-monitor deploys after git push.\n");
+            hooks::install_systemd_service()?;
+            println!("\n  Done! Beacon daemon is running.\n");
         }
         Commands::Uninstall => {
-            println!("\n  Removing Claude Code integration...\n");
+            println!("\n  Removing Beacon...\n");
             hooks::uninstall_claude_hook()?;
+            hooks::uninstall_systemd_service()?;
             println!("\n  Done.\n");
         }
     }
@@ -143,7 +181,7 @@ async fn handle_remote(action: RemoteAction) -> Result<()> {
         RemoteAction::Connect { token, api_url } => {
             let token = token.trim().to_string();
             if token.is_empty() {
-                anyhow::bail!("Token cannot be empty. Get one from /start in @BeaconCIBot");
+                anyhow::bail!("Token cannot be empty. Get one from /start in @beacon_github_bot");
             }
 
             let url = api_url.unwrap_or_else(|| config::DEFAULT_API_URL.to_string());
@@ -191,7 +229,6 @@ async fn do_watch() -> Result<()> {
     let provider = GitHubProvider::new(&token)?;
     let status = watcher::watch(provider, &repo, &branch, &commit).await?;
 
-    // Send to remote if connected and deploy is terminal
     if let Some(remote) = &cfg.remote {
         if status.is_terminal() {
             if let Err(e) = telegram::send_deploy_status(remote, &status).await {

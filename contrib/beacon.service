@@ -1,0 +1,12 @@
+[Unit]
+Description=Beacon — CI/CD deploy monitor daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/beacon daemon
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

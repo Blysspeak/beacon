@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::time::{Duration, Instant};
 
 use crate::git::RepoInfo;
-use crate::providers::{DeployStatus, Provider};
+use crate::providers::{DeployStatus, Provider, Status};
 use crate::{mailbox, output};
 
 const PHASE1_INTERVAL: Duration = Duration::from_secs(5);
@@ -11,6 +11,7 @@ const PHASE2_INTERVAL: Duration = Duration::from_secs(15);
 const MAX_DURATION: Duration = Duration::from_secs(30 * 60);
 const NOT_FOUND_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Foreground watch loop with terminal output (for `beacon watch`)
 pub async fn watch(
     provider: impl Provider,
     repo: &RepoInfo,
@@ -32,9 +33,7 @@ pub async fn watch(
 
         match provider.get_run_status(repo, branch, commit).await {
             Ok(status) => {
-                // Don't overwrite a terminal result (success/failed) with not_found
-                // This prevents a push to repo-without-CI from erasing the last real result
-                if status.status != crate::providers::Status::NotFound {
+                if status.status != Status::NotFound {
                     mailbox::write(&status)?;
                 }
                 output::print_progress(&status, elapsed);
@@ -45,10 +44,9 @@ pub async fn watch(
                     return Ok(status);
                 }
 
-                // Give up if no workflow run found after 2 minutes (repo has no CI)
-                if status.status == crate::providers::Status::NotFound
-                    && start.elapsed() > NOT_FOUND_TIMEOUT
-                {
+                if status.status == Status::NotFound && start.elapsed() > NOT_FOUND_TIMEOUT {
+                    eprint!("\r{}\r", " ".repeat(80));
+                    eprintln!("  No CI workflow found. Repo may not have GitHub Actions.");
                     return Ok(last_status);
                 }
 
@@ -66,46 +64,4 @@ pub async fn watch(
         };
         tokio::time::sleep(interval).await;
     }
-}
-
-pub fn daemonize() -> Result<()> {
-    let beacon_dir = crate::config::beacon_dir()?;
-    let pid_path = beacon_dir.join("watcher.pid");
-
-    // Kill previous daemon if running
-    if pid_path.exists() {
-        if let Ok(old_pid) = std::fs::read_to_string(&pid_path) {
-            if let Ok(pid) = old_pid.trim().parse::<i32>() {
-                // Send SIGTERM to old daemon
-                kill_process(pid);
-            }
-        }
-    }
-
-    let exe = std::env::current_exe()?;
-
-    // Re-run ourselves without --daemon to get foreground watch
-    let mut args: Vec<String> = std::env::args().skip(1).collect();
-    args.retain(|a| a != "--daemon");
-
-    let child = std::process::Command::new(exe)
-        .args(&args)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::fs::File::create(beacon_dir.join("daemon.log"))?)
-        .stdin(std::process::Stdio::null())
-        .spawn()?;
-
-    let pid = child.id();
-    std::fs::write(&pid_path, pid.to_string())?;
-
-    println!("  Background watcher started (PID {pid})");
-    println!("  Logs: ~/.beacon/daemon.log");
-
-    Ok(())
-}
-
-fn kill_process(pid: i32) {
-    let _ = std::process::Command::new("kill")
-        .arg(pid.to_string())
-        .output();
 }
