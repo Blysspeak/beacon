@@ -1,0 +1,10 @@
+#custom-beacon {
+    background-color: #111827;
+    border-radius: 14px;
+    padding: 3px 10px;
+    color: #6c7086;
+}
+#custom-beacon.success { color: #a6e3a1; }
+#custom-beacon.failed { color: #f38ba8; }
+#custom-beacon.progress { color: #f9e2af; }
+#custom-beacon.waiting { color: #7dc4e4; }

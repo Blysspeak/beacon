@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-19
+
+### Added
+
+- Waybar widget (`contrib/waybar/beacon.py`) — real-time deploy status in status bar
+- Waybar styles (`contrib/waybar/style.css`) — Catppuccin-themed colors
+- Waybar setup step in `install.sh` (Step 4/5, optional, default: No)
+- `SIGRTMIN+8` signal to waybar after every mailbox write — instant widget refresh, no polling
+- Widget shows workflow name (e.g. `✓ boostix/Deploy Backend`)
+- Click widget to open GitHub Actions run in browser
+
+### Fixed
+
+- GitHub API requires full 40-char SHA — was sending 7-char short SHA, causing 0 results
+- Install script: decomposed waybar module into `contrib/waybar/` (no more inline heredoc)
+
 ## [0.2.0] - 2026-03-19
 
 ### Added

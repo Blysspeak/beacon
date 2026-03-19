@@ -103,6 +103,40 @@ This adds a PostToolUse hook that:
 
 If a deploy fails, Claude sees the error before generating more code on top of a broken build.
 
+## Waybar Widget
+
+Real-time deploy status in your status bar — no polling, instant updates via signal.
+
+```
+✓ myapp/Deploy Backend      ← green, success
+✗ myapp/Deploy Frontend     ← red, failed
+◉ myapp/Deploy Backend      ← yellow, in progress
+```
+
+The installer can set it up automatically, or install manually:
+
+```bash
+# Copy module
+cp contrib/waybar/beacon.py ~/.config/waybar/modules/
+chmod +x ~/.config/waybar/modules/beacon.py
+
+# Add to waybar config (modules-left):
+#   "custom/beacon"
+# And add module config:
+#   "custom/beacon": {
+#     "format": "{}",
+#     "return-type": "json",
+#     "exec": "~/.config/waybar/modules/beacon.py",
+#     "signal": 8,
+#     "interval": "once"
+#   }
+
+# Append styles
+cat contrib/waybar/style.css >> ~/.config/waybar/style.css
+```
+
+Click the widget to open the GitHub Actions run in browser.
+
 ## How It Works
 
 1. **Auto-detect** — parses `git remote` to find your GitHub repo
@@ -110,6 +144,7 @@ If a deploy fails, Claude sees the error before generating more code on top of a
 3. **Adaptive polling** — 5s intervals for first 2 min, then 15s, max 30 min
 4. **Local mailbox** — results saved to `~/.beacon/last_deploy.json`
 5. **Remote notifications** — sends to Beacon Bot API → Telegram
+6. **Waybar signal** — sends `SIGRTMIN+8` to waybar for instant widget refresh
 
 ## Configuration
 
@@ -136,6 +171,7 @@ Beacon stores its data in `~/.beacon/`:
 - [ ] Vercel provider
 - [ ] Fly.io provider
 - [x] `beacon install` — auto-setup Claude Code hooks
+- [x] Waybar widget with real-time updates
 - [ ] Webhook mode (instead of polling)
 - [ ] Multi-repo dashboard
 

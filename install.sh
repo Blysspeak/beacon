@@ -441,6 +441,77 @@ setup_telegram() {
     fi
 }
 
+# --- Waybar widget ---
+
+setup_waybar() {
+    WAYBAR_DIR="$HOME/.config/waybar"
+    MODULE_DIR="$WAYBAR_DIR/modules"
+    MODULE_PATH="$MODULE_DIR/beacon.py"
+    CONFIG_PATH="$WAYBAR_DIR/config"
+    STYLE_PATH="$WAYBAR_DIR/style.css"
+
+    mkdir -p "$MODULE_DIR"
+
+    # Copy module script from contrib/ (if in repo) or download
+    if [ -f "contrib/waybar/beacon.py" ]; then
+        /usr/bin/cp contrib/waybar/beacon.py "$MODULE_PATH"
+    else
+        download "https://raw.githubusercontent.com/${REPO}/main/contrib/waybar/beacon.py" "$MODULE_PATH" \
+            || { warn "Failed to download waybar module"; return 1; }
+    fi
+    chmod +x "$MODULE_PATH"
+    success "Module script installed"
+
+    # Add to waybar config if not already present
+    if [ -f "$CONFIG_PATH" ]; then
+        if grep -q "custom/beacon" "$CONFIG_PATH" 2>/dev/null; then
+            success "Already in waybar config"
+        else
+            if command -v jq >/dev/null 2>&1 && jq empty "$CONFIG_PATH" 2>/dev/null; then
+                TMP=$(mktemp)
+                jq '
+                    .["modules-left"] += ["custom/beacon"] |
+                    .["custom/beacon"] = {
+                        "format": "{}",
+                        "return-type": "json",
+                        "exec": "~/.config/waybar/modules/beacon.py",
+                        "exec-on-event": false,
+                        "interval": "once",
+                        "signal": 8,
+                        "on-click": "xdg-open $(jq -r '.url // empty' ~/.beacon/last_deploy.json 2>/dev/null) 2>/dev/null || true"
+                    }
+                ' "$CONFIG_PATH" > "$TMP" && mv "$TMP" "$CONFIG_PATH"
+                success "Added to waybar config"
+            else
+                warn "Could not parse waybar config (not JSON or jq missing)"
+                dim "Add \"custom/beacon\" to modules-left manually"
+            fi
+        fi
+    else
+        warn "waybar config not found at $CONFIG_PATH"
+    fi
+
+    # Add styles if not already present
+    if [ -f "$STYLE_PATH" ]; then
+        if grep -q "custom-beacon" "$STYLE_PATH" 2>/dev/null; then
+            success "Styles already present"
+        else
+            if [ -f "contrib/waybar/style.css" ]; then
+                printf '\n' >> "$STYLE_PATH"
+                cat contrib/waybar/style.css >> "$STYLE_PATH"
+            else
+                STYLE_URL="https://raw.githubusercontent.com/${REPO}/main/contrib/waybar/style.css"
+                printf '\n' >> "$STYLE_PATH"
+                download "$STYLE_URL" - >> "$STYLE_PATH" 2>/dev/null
+            fi
+            success "Styles added to style.css"
+        fi
+    fi
+
+    dim "  Widget refreshes instantly via signal (no polling)"
+    dim "  Restart waybar to apply: pkill waybar && waybar &"
+}
+
 # --- PATH check ---
 
 check_path() {
@@ -492,7 +563,7 @@ main() {
     show_banner
 
     # ── Step 1: Install ──
-    step "1/4" "Install binary"
+    step "1/5" "Install binary"
 
     detect_platform
     detect_install_dir
@@ -503,7 +574,7 @@ main() {
     check_path
 
     # ── Step 2: Claude Code ──
-    step "2/4" "Claude Code integration"
+    step "2/5" "Claude Code integration"
 
     if ask_yn "Set up Claude Code hooks?" "y"; then
         setup_claude_hooks || true
@@ -512,7 +583,7 @@ main() {
     fi
 
     # ── Step 3: Telegram ──
-    step "3/4" "Telegram notifications"
+    step "3/5" "Telegram notifications"
 
     if ask_yn "Connect Telegram?" "y"; then
         setup_telegram
@@ -520,8 +591,22 @@ main() {
         dim "Skip. Run later: beacon remote connect <TOKEN>"
     fi
 
+    # ── Step 4: Waybar (optional) ──
+    step "4/5" "Waybar widget (optional)"
+
+    if command -v waybar >/dev/null 2>&1 && [ -d "$HOME/.config/waybar" ]; then
+        info "Waybar detected"
+        if ask_yn "Install Beacon status widget for Waybar?" "n"; then
+            setup_waybar
+        else
+            dim "Skip. You can set it up later manually."
+        fi
+    else
+        dim "Waybar not detected — skipping"
+    fi
+
     # ── Done ──
-    step "4/4" "Complete"
+    step "5/5" "Complete"
     show_complete
 }
 
