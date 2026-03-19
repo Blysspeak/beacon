@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-pub const DEFAULT_API_URL: &str = "https://beacon-bot.example.com";
+pub const DEFAULT_API_URL: &str = "https://beacon.blysspeak.space";
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Config {
