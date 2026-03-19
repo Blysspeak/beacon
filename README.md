@@ -37,17 +37,26 @@ git push → Beacon starts monitoring → polls GitHub Actions →
 ## Quick Start
 
 ```bash
-# Install
+# One-line install (interactive wizard: binary + Claude Code hooks + Telegram)
+git clone https://github.com/Blysspeak/beacon && cd beacon && bash install.sh
+```
+
+Or install from pre-built binary:
+```bash
+curl -fsSL https://raw.githubusercontent.com/Blysspeak/beacon/main/install.sh | sh
+```
+
+Or via Cargo:
+```bash
 cargo install beacon
+beacon install    # set up Claude Code hooks
+```
 
-# Push and watch (replaces git push)
-beacon push
-
-# Or watch a deploy that's already running
-beacon watch
-
-# Check last result
-beacon status
+Then just use it:
+```bash
+beacon push       # git push + auto-monitor deploy
+beacon watch      # monitor current deploy
+beacon status     # last deploy result
 ```
 
 ## Commands
@@ -62,6 +71,8 @@ beacon status
 | `beacon remote connect <TOKEN>` | Connect Telegram notifications |
 | `beacon remote test` | Verify Telegram connection |
 | `beacon remote disconnect` | Remove Telegram integration |
+| `beacon install` | Set up Claude Code hooks (auto-monitor after push) |
+| `beacon uninstall` | Remove Claude Code hooks |
 
 ## Telegram Notifications
 
@@ -80,28 +91,17 @@ After this, every `beacon push` or `beacon watch` will send you a Telegram messa
 
 ## Claude Code Integration
 
-Add a hook to `.claude/settings.json` so your AI agent always knows the deploy status:
+The installer sets up hooks automatically. Or do it manually:
 
-```json
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "beacon status --json 2>/dev/null | head -1",
-            "timeout": 5
-          }
-        ]
-      }
-    ]
-  }
-}
+```bash
+beacon install
 ```
 
-This feeds the last deploy status to Claude before every action. If the deploy failed, the agent knows and can help fix it.
+This adds a PostToolUse hook that:
+- **After `git push`** — starts background deploy monitoring
+- **Before every action** — checks if last deploy failed and warns Claude
+
+If a deploy fails, Claude sees the error before generating more code on top of a broken build.
 
 ## How It Works
 
@@ -135,7 +135,7 @@ Beacon stores its data in `~/.beacon/`:
 - [ ] Railway provider
 - [ ] Vercel provider
 - [ ] Fly.io provider
-- [ ] `beacon install` — auto-setup Claude Code hooks
+- [x] `beacon install` — auto-setup Claude Code hooks
 - [ ] Webhook mode (instead of polling)
 - [ ] Multi-repo dashboard
 

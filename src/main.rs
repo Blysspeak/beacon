@@ -1,5 +1,6 @@
 mod config;
 mod git;
+mod hooks;
 mod mailbox;
 mod output;
 mod providers;
@@ -50,6 +51,12 @@ enum Commands {
         #[command(subcommand)]
         action: RemoteAction,
     },
+
+    /// Install Claude Code hooks for automatic deploy monitoring
+    Install,
+
+    /// Remove Claude Code hooks
+    Uninstall,
 }
 
 #[derive(Subcommand)]
@@ -116,6 +123,16 @@ async fn main() -> Result<()> {
             do_watch().await?;
         }
         Commands::Remote { action } => handle_remote(action).await?,
+        Commands::Install => {
+            println!("\n  Setting up Claude Code integration...\n");
+            hooks::install_claude_hook()?;
+            println!("\n  Done! Beacon will now auto-monitor deploys after git push.\n");
+        }
+        Commands::Uninstall => {
+            println!("\n  Removing Claude Code integration...\n");
+            hooks::uninstall_claude_hook()?;
+            println!("\n  Done.\n");
+        }
     }
 
     Ok(())
