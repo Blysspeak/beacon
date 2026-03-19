@@ -8,6 +8,7 @@ mod output;
 mod providers;
 mod queue;
 mod telegram;
+mod tui;
 mod watcher;
 
 use anyhow::{Context, Result};
@@ -68,6 +69,9 @@ enum Commands {
         #[command(subcommand)]
         action: RemoteAction,
     },
+
+    /// Interactive deploy dashboard (TUI)
+    Tui,
 
     /// Show deploy history
     Log {
@@ -173,6 +177,9 @@ async fn main() -> Result<()> {
             let commit = git::head_commit()?;
             queue::enqueue(&repo.full_name(), &branch, &commit)?;
             println!("  Queued for monitoring.");
+        }
+        Commands::Tui => {
+            tui::run()?;
         }
         Commands::Log { json, n, repo } => {
             let filter = history::HistoryFilter { limit: n, repo };
