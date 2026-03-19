@@ -6,7 +6,7 @@ use tokio::task::JoinHandle;
 use crate::git::RepoInfo;
 use crate::providers::github::GitHubProvider;
 use crate::providers::{Provider, Status};
-use crate::{config, mailbox, queue, telegram};
+use crate::{config, history, mailbox, queue, telegram};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -112,6 +112,11 @@ async fn track_deploy(
                 }
 
                 if status.is_terminal() {
+                    // Write to history
+                    if let Err(e) = history::append(&status) {
+                        eprintln!("  History write failed: {e:#}");
+                    }
+
                     eprintln!(
                         "  {} {} — {:?}",
                         if status.status == Status::Success { "✓" } else { "✗" },

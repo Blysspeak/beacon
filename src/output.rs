@@ -73,6 +73,54 @@ pub fn print_progress(status: &DeployStatus, elapsed: Duration) {
     );
 }
 
+pub fn print_history(entries: &[DeployStatus]) {
+    if entries.is_empty() {
+        println!("\n  No deploy history yet.\n");
+        return;
+    }
+
+    println!();
+    for entry in entries {
+        let icon = match entry.status {
+            Status::Success => "✓".green().to_string(),
+            Status::Failed => "✗".red().to_string(),
+            Status::InProgress => "◉".yellow().to_string(),
+            Status::NotFound => "?".dimmed().to_string(),
+        };
+
+        let short_repo = entry.repo.split('/').last().unwrap_or(&entry.repo);
+        let commit = if entry.commit.len() > 7 { &entry.commit[..7] } else { &entry.commit };
+        let workflow = entry.workflow_name.as_deref().unwrap_or("-");
+        let ago = time_ago(&entry.timestamp);
+
+        println!(
+            "  {icon}  {:<20} {:<18} {:<7}  {:<20} {}",
+            short_repo.bold(),
+            workflow.dimmed(),
+            commit.dimmed(),
+            entry.branch.cyan(),
+            ago.dimmed(),
+        );
+    }
+    println!();
+}
+
+fn time_ago(ts: &chrono::DateTime<chrono::Utc>) -> String {
+    let now = chrono::Utc::now();
+    let diff = now.signed_duration_since(*ts);
+    let secs = diff.num_seconds();
+
+    if secs < 60 {
+        format!("{secs}s ago")
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h ago", secs / 3600)
+    } else {
+        format!("{}d ago", secs / 86400)
+    }
+}
+
 pub fn print_watch_start(repo: &str, branch: &str) {
     println!(
         "\n  {} Watching deploy for {} @ {}\n",

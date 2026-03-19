@@ -33,7 +33,7 @@ pub fn read_last() -> Result<Option<DeployStatus>> {
 }
 
 /// Send SIGRTMIN+8 to all waybar processes to refresh the beacon widget
-fn refresh_waybar() {
+pub fn refresh_waybar() {
     // pkill --signal SIGRTMIN+8 waybar
     let _ = std::process::Command::new("pkill")
         .args(["--signal", "SIGRTMIN+8", "waybar"])

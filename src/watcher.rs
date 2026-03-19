@@ -39,6 +39,7 @@ pub async fn watch(
                 output::print_progress(&status, elapsed);
 
                 if status.is_terminal() {
+                    let _ = crate::history::append(&status);
                     eprint!("\r{}\r", " ".repeat(80));
                     output::print_status(&status);
                     return Ok(status);

@@ -1,6 +1,7 @@
 mod config;
 mod daemon;
 mod git;
+mod history;
 mod hooks;
 mod mailbox;
 mod output;
@@ -66,6 +67,21 @@ enum Commands {
     Remote {
         #[command(subcommand)]
         action: RemoteAction,
+    },
+
+    /// Show deploy history
+    Log {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+
+        /// Number of entries to show
+        #[arg(short, long, default_value_t = 20)]
+        n: usize,
+
+        /// Filter by repo (substring match)
+        #[arg(long)]
+        repo: Option<String>,
     },
 
     /// Install Claude Code hooks and systemd service
@@ -157,6 +173,15 @@ async fn main() -> Result<()> {
             let commit = git::head_commit()?;
             queue::enqueue(&repo.full_name(), &branch, &commit)?;
             println!("  Queued for monitoring.");
+        }
+        Commands::Log { json, n, repo } => {
+            let filter = history::HistoryFilter { limit: n, repo };
+            let entries = history::read(&filter)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&entries)?);
+            } else {
+                output::print_history(&entries);
+            }
         }
         Commands::Remote { action } => handle_remote(action).await?,
         Commands::Install => {
