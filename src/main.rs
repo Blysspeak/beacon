@@ -141,6 +141,11 @@ async fn main() -> Result<()> {
 async fn handle_remote(action: RemoteAction) -> Result<()> {
     match action {
         RemoteAction::Connect { token, api_url } => {
+            let token = token.trim().to_string();
+            if token.is_empty() {
+                anyhow::bail!("Token cannot be empty. Get one from /start in @BeaconCIBot");
+            }
+
             let url = api_url.unwrap_or_else(|| config::DEFAULT_API_URL.to_string());
 
             let mut cfg = config::load()?;

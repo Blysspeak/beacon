@@ -182,25 +182,33 @@ build_from_source() {
         die "Rust not found. Install: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
     fi
 
-    info "Building from source..."
+    info "Building from source (this may take 1-2 minutes)..."
     echo ""
 
-    TOTAL_CRATES=$(grep -c '^\[' Cargo.lock 2>/dev/null || echo "?")
-
-    cargo build --release 2>&1 | while IFS= read -r line; do
+    # Build and show progress — pipe to subshell for live output
+    if cargo build --release 2>&1 | while IFS= read -r line; do
         case "$line" in
             *Compiling*)
                 CRATE=$(echo "$line" | sed 's/.*Compiling \([^ ]*\).*/\1/')
-                printf "\r  ${DIM}  Compiling %-30s${RESET}" "$CRATE"
+                printf "\r  ${DIM}  Compiling %-40s${RESET}" "$CRATE"
                 ;;
             *Finished*)
                 printf "\r%-60s\r" " "
                 ;;
+            *error*)
+                printf "\r%-60s\r" " "
+                echo "  ${RED}$line${RESET}"
+                ;;
         esac
-    done
+    done; then
+        : # success
+    else
+        echo ""
+        die "Build failed. Check error output above."
+    fi
 
     if [ ! -f "target/release/$BINARY" ]; then
-        die "Build failed"
+        die "Build failed — binary not produced"
     fi
 
     success "Build complete"
@@ -209,7 +217,13 @@ build_from_source() {
 # --- Install binary ---
 
 install_binary() {
-    mkdir -p "$INSTALL_DIR"
+    try_exec mkdir -p "$INSTALL_DIR" || die "Cannot create ${INSTALL_DIR}"
+
+    # Check if already installed with same version
+    if command -v "$BINARY" >/dev/null 2>&1; then
+        EXISTING=$("$BINARY" --version 2>/dev/null | head -1)
+        info "Found existing: ${DIM}${EXISTING}${RESET}"
+    fi
 
     if [ -f "Cargo.toml" ] && [ -f "target/release/$BINARY" ]; then
         BIN_SOURCE="target/release/$BINARY"
@@ -305,12 +319,25 @@ setup_claude_hooks() {
     HOOK_ENTRY="{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"$HOOK_PATH\",\"timeout\":10}]}"
 
     if [ -f "$SETTINGS" ]; then
+        # Validate existing settings.json is valid JSON
+        if ! jq empty "$SETTINGS" 2>/dev/null; then
+            warn "settings.json is corrupted, creating backup"
+            /usr/bin/cp "$SETTINGS" "$SETTINGS.bak"
+        fi
+
         TMP=$(mktemp)
-        jq --argjson hook "$HOOK_ENTRY" '
+        if jq --argjson hook "$HOOK_ENTRY" '
             .hooks //= {} |
             .hooks.PostToolUse //= [] |
             .hooks.PostToolUse += [$hook]
-        ' "$SETTINGS" > "$TMP" && mv "$TMP" "$SETTINGS"
+        ' "$SETTINGS" > "$TMP" 2>/dev/null; then
+            mv "$TMP" "$SETTINGS"
+        else
+            rm -f "$TMP"
+            warn "Failed to update settings.json"
+            dim "Run ${BOLD}beacon install${RESET} to retry"
+            return 1
+        fi
     else
         cat > "$SETTINGS" << EOF
 {
@@ -344,33 +371,62 @@ setup_telegram() {
     echo ""
     echo "  ${GREEN}│${RESET} Open ${BOLD}@BeaconCIBot${RESET} in Telegram"
     echo "  ${GREEN}│${RESET} Press ${BOLD}/start${RESET} to get your token"
-    echo "  ${GREEN}│${RESET}"
+    echo "  ${GREEN}│${RESET} It looks like: ${DIM}xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx${RESET}"
     echo ""
 
-    TOKEN=$(ask_input "Paste your token:")
+    # Loop until valid token or user skips
+    ATTEMPTS=0
+    while true; do
+        TOKEN=$(ask_input "Paste your token (or 'skip'):")
 
-    if [ -z "$TOKEN" ]; then
-        warn "Skipped"
-        dim "Connect later: beacon remote connect <TOKEN>"
+        # User wants to skip
+        case "$TOKEN" in
+            skip|SKIP|Skip|s|S|"")
+                warn "Skipped"
+                dim "Connect later: beacon remote connect <TOKEN>"
+                return
+                ;;
+        esac
+
+        # Validate UUID format (8-4-4-4-12)
+        case "$TOKEN" in
+            ????????-????-????-????-????????????)
+                break
+                ;;
+            *)
+                ATTEMPTS=$((ATTEMPTS + 1))
+                if [ "$ATTEMPTS" -ge 3 ]; then
+                    warn "Too many attempts"
+                    dim "Connect later: beacon remote connect <TOKEN>"
+                    return
+                fi
+                error "Invalid token format. Expected UUID like: ${DIM}xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx${RESET}"
+                dim "Get it from /start in @BeaconCIBot"
+                echo ""
+                ;;
+        esac
+    done
+
+    # Connect
+    CONNECT_ARGS="$TOKEN"
+    [ -n "$BEACON_API_URL" ] && CONNECT_ARGS="$TOKEN --api-url $BEACON_API_URL"
+
+    if "$INSTALL_DIR/$BINARY" remote connect $CONNECT_ARGS 2>/dev/null; then
+        success "Connected to Telegram"
+    else
+        warn "Connection failed"
+        dim "Try manually: beacon remote connect $TOKEN"
         return
     fi
 
-    # connect with local API for testing, or remote
-    if [ -n "$BEACON_API_URL" ]; then
-        "$INSTALL_DIR/$BINARY" remote connect "$TOKEN" --api-url "$BEACON_API_URL" 2>/dev/null \
-            && success "Connected to Telegram" \
-            || warn "Connection failed"
-    else
-        "$INSTALL_DIR/$BINARY" remote connect "$TOKEN" 2>/dev/null \
-            && success "Connected to Telegram" \
-            || warn "Connection failed"
-    fi
-
+    # Test
     echo ""
     if ask_yn "Send test notification?" "y"; then
-        "$INSTALL_DIR/$BINARY" remote test 2>/dev/null \
-            && success "Test sent — check Telegram!" \
-            || warn "Test failed. Verify token and bot."
+        if "$INSTALL_DIR/$BINARY" remote test 2>/dev/null; then
+            success "Test sent — check Telegram!"
+        else
+            warn "Test failed. Check bot status and try: beacon remote test"
+        fi
     fi
 }
 
@@ -378,7 +434,10 @@ setup_telegram() {
 
 check_path() {
     case ":$PATH:" in
-        *":$INSTALL_DIR:"*) return ;;
+        *":$INSTALL_DIR:"*)
+            success "Already in PATH"
+            return
+            ;;
     esac
 
     echo ""
@@ -391,18 +450,22 @@ check_path() {
         *)    RC_FILE="$HOME/.bashrc"; RC_DISPLAY="~/.bashrc" ;;
     esac
 
+    REAL_RC=$(eval echo "$RC_FILE")
+
     echo ""
     if ask_yn "Add to PATH? (${RC_DISPLAY})" "y"; then
-        if [ "$SHELL_NAME" = "fish" ]; then
-            echo "" >> "$RC_FILE"
-            echo "# Beacon CLI" >> "$RC_FILE"
-            echo "fish_add_path ${INSTALL_DIR}" >> "$RC_FILE"
+        # Don't add duplicate entry
+        if grep -q "# Beacon CLI" "$REAL_RC" 2>/dev/null; then
+            success "Already in ${RC_DISPLAY}"
         else
-            echo "" >> "$RC_FILE"
-            echo "# Beacon CLI" >> "$RC_FILE"
-            echo "export PATH=\"${INSTALL_DIR}:\$PATH\"" >> "$RC_FILE"
+            [ ! -f "$REAL_RC" ] && touch "$REAL_RC"
+            if [ "$SHELL_NAME" = "fish" ]; then
+                printf '\n# Beacon CLI\nfish_add_path %s\n' "$INSTALL_DIR" >> "$REAL_RC"
+            else
+                printf '\n# Beacon CLI\nexport PATH="%s:$PATH"\n' "$INSTALL_DIR" >> "$REAL_RC"
+            fi
+            success "Added to ${RC_DISPLAY}"
         fi
-        success "Added to ${RC_DISPLAY}"
         export PATH="${INSTALL_DIR}:$PATH"
     else
         echo ""
