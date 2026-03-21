@@ -9,6 +9,39 @@ pub const DEFAULT_API_URL: &str = "https://beacon.blysspeak.space";
 pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote: Option<RemoteConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poll: Option<PollConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PollConfig {
+    /// Repos to watch (owner/repo format). Empty = auto-discover from history.
+    #[serde(default)]
+    pub repos: Vec<String>,
+    /// Poll interval in seconds (default 60)
+    #[serde(default = "default_poll_interval")]
+    pub interval_secs: u64,
+    /// Auto-discover repos from deploy history
+    #[serde(default = "default_true")]
+    pub auto_discover: bool,
+}
+
+impl Default for PollConfig {
+    fn default() -> Self {
+        Self {
+            repos: vec![],
+            interval_secs: 60,
+            auto_discover: true,
+        }
+    }
+}
+
+fn default_poll_interval() -> u64 {
+    60
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

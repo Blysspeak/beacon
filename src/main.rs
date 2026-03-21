@@ -5,6 +5,7 @@ mod history;
 mod hooks;
 mod mailbox;
 mod output;
+mod poller;
 mod providers;
 mod queue;
 mod telegram;
@@ -88,11 +89,38 @@ enum Commands {
         repo: Option<String>,
     },
 
+    /// Manage GitHub polling (auto-discover repos from history)
+    Poll {
+        #[command(subcommand)]
+        action: PollAction,
+    },
+
     /// Install Claude Code hooks and systemd service
     Install,
 
     /// Remove Claude Code hooks and systemd service
     Uninstall,
+}
+
+#[derive(Subcommand)]
+enum PollAction {
+    /// Add a repo to watch list
+    Add {
+        /// Repository in owner/repo format
+        repo: String,
+    },
+    /// Remove a repo from watch list
+    Remove {
+        /// Repository in owner/repo format
+        repo: String,
+    },
+    /// List watched repos (configured + auto-discovered)
+    List,
+    /// Set poll interval in seconds
+    Interval {
+        /// Interval in seconds
+        seconds: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -191,6 +219,7 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Remote { action } => handle_remote(action).await?,
+        Commands::Poll { action } => handle_poll(action)?,
         Commands::Install => {
             println!("\n  Setting up Beacon...\n");
             hooks::install_claude_hook()?;
@@ -246,6 +275,75 @@ async fn handle_remote(action: RemoteAction) -> Result<()> {
                     println!("\n  Not connected. Run `beacon remote connect <TOKEN>` first.\n");
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+fn handle_poll(action: PollAction) -> Result<()> {
+    match action {
+        PollAction::Add { repo } => {
+            let mut cfg = config::load()?;
+            let poll = cfg.poll.get_or_insert_with(config::PollConfig::default);
+            if poll.repos.contains(&repo) {
+                println!("\n  Already watching {repo}\n");
+            } else {
+                poll.repos.push(repo.clone());
+                config::save(&cfg)?;
+                println!("\n  Added {repo} to watch list");
+                println!("  Restart daemon to apply: systemctl --user restart beacon\n");
+            }
+        }
+        PollAction::Remove { repo } => {
+            let mut cfg = config::load()?;
+            if let Some(poll) = &mut cfg.poll {
+                poll.repos.retain(|r| r != &repo);
+                config::save(&cfg)?;
+                println!("\n  Removed {repo} from watch list\n");
+            } else {
+                println!("\n  {repo} was not in watch list\n");
+            }
+        }
+        PollAction::List => {
+            let cfg = config::load()?;
+            let poll = cfg.poll.unwrap_or_default();
+
+            println!("\n  Poll interval: {}s", poll.interval_secs);
+            println!("  Auto-discover: {}\n", if poll.auto_discover { "on" } else { "off" });
+
+            if !poll.repos.is_empty() {
+                println!("  Configured repos:");
+                for r in &poll.repos {
+                    println!("    {r}");
+                }
+                println!();
+            }
+
+            if poll.auto_discover {
+                match history::unique_repos() {
+                    Ok(repos) if !repos.is_empty() => {
+                        println!("  Auto-discovered from history:");
+                        for r in &repos {
+                            if !poll.repos.contains(r) {
+                                println!("    {r}");
+                            }
+                        }
+                        println!();
+                    }
+                    _ => {}
+                }
+            }
+        }
+        PollAction::Interval { seconds } => {
+            if seconds < 10 {
+                anyhow::bail!("Interval too short (min 10s to avoid rate limits)");
+            }
+            let mut cfg = config::load()?;
+            let poll = cfg.poll.get_or_insert_with(config::PollConfig::default);
+            poll.interval_secs = seconds;
+            config::save(&cfg)?;
+            println!("\n  Poll interval set to {seconds}s");
+            println!("  Restart daemon to apply: systemctl --user restart beacon\n");
         }
     }
     Ok(())

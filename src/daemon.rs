@@ -6,9 +6,9 @@ use tokio::task::JoinHandle;
 use crate::git::RepoInfo;
 use crate::providers::github::GitHubProvider;
 use crate::providers::{Provider, Status};
-use crate::{config, history, mailbox, queue, telegram};
+use crate::{config, history, mailbox, poller, queue, telegram};
 
-const POLL_INTERVAL: Duration = Duration::from_secs(2);
+const QUEUE_INTERVAL: Duration = Duration::from_secs(2);
 
 struct TrackedJob {
     handle: JoinHandle<()>,
@@ -17,18 +17,43 @@ struct TrackedJob {
 }
 
 pub async fn run() -> Result<()> {
-    eprintln!("Beacon daemon started. Watching ~/.beacon/queue/");
+    let cfg = config::load()?;
 
     // Resolve GitHub token once at startup
     let token = crate::providers::github::resolve_token()?;
-    let remote_cfg = config::load()?.remote;
+    let remote_cfg = cfg.remote;
+
+    // Set up GitHub poller if configured (or default: auto-discover from history)
+    let poll_config = cfg.poll.unwrap_or_default();
+    let poll_interval = Duration::from_secs(poll_config.interval_secs);
+    let mut gh_poller = poller::GitHubPoller::new(poll_config);
+    let poll_provider = GitHubProvider::new(&token)?;
+    let mut last_poll = std::time::Instant::now() - poll_interval; // poll immediately on start
+
+    eprintln!("Beacon daemon started. Watching queue + polling GitHub ({}s interval)", poll_interval.as_secs());
 
     let mut active: HashMap<String, TrackedJob> = HashMap::new();
 
     loop {
-        // Poll queue
-        let events = queue::dequeue_all().unwrap_or_default();
+        // 1. Check queue for push events (from hooks)
+        let mut events = queue::dequeue_all().unwrap_or_default();
 
+        // 2. Check GitHub poller on interval
+        if last_poll.elapsed() >= poll_interval {
+            let polled = gh_poller.poll(&poll_provider).await;
+            if !polled.is_empty() {
+                eprintln!("  Poller discovered {} new run(s)", polled.len());
+            }
+            // Don't enqueue events for repos already being tracked
+            for event in polled {
+                if !active.contains_key(&event.repo) || active.get(&event.repo).map_or(false, |j| j.handle.is_finished()) {
+                    events.push(event);
+                }
+            }
+            last_poll = std::time::Instant::now();
+        }
+
+        // 3. Start tracking new events
         for event in events {
             let repo_key = event.repo.clone();
             let commit_short = if event.commit.len() > 7 { &event.commit[..7] } else { &event.commit };
@@ -63,7 +88,7 @@ pub async fn run() -> Result<()> {
         // Clean up completed tasks
         active.retain(|_key, job| !job.handle.is_finished());
 
-        tokio::time::sleep(POLL_INTERVAL).await;
+        tokio::time::sleep(QUEUE_INTERVAL).await;
     }
 }
 

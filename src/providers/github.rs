@@ -163,6 +163,57 @@ fn urlencoded(s: &str) -> String {
     out
 }
 
+/// A recent workflow run (for polling mode — no commit filter)
+#[derive(Debug, Clone)]
+pub struct RecentRun {
+    pub id: u64,
+    pub name: String,
+    pub head_sha: String,
+    pub head_branch: String,
+    pub status: String,
+    pub conclusion: Option<String>,
+    pub html_url: String,
+}
+
+impl GitHubProvider {
+    /// List recent workflow runs for a repo (no commit SHA filter).
+    /// Used by the poller to discover new runs.
+    pub async fn list_recent_runs(
+        &self,
+        repo: &RepoInfo,
+        per_page: u8,
+    ) -> Result<Vec<RecentRun>> {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/actions/runs?per_page={per_page}",
+            repo.owner, repo.repo,
+        );
+
+        let resp = self.client.get(&url).send().await?;
+
+        if !resp.status().is_success() {
+            let code = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("GitHub API error ({code}) for {}/{}: {body}", repo.owner, repo.repo);
+        }
+
+        let data: GhRunsResponseFull = resp.json().await?;
+
+        Ok(data
+            .workflow_runs
+            .into_iter()
+            .map(|r| RecentRun {
+                id: r.id,
+                name: r.name,
+                head_sha: r.head_sha,
+                head_branch: r.head_branch,
+                status: r.status,
+                conclusion: r.conclusion,
+                html_url: r.html_url,
+            })
+            .collect())
+    }
+}
+
 // --- GitHub API response types ---
 
 #[derive(Deserialize)]
@@ -171,9 +222,25 @@ struct GhRunsResponse {
 }
 
 #[derive(Deserialize)]
+struct GhRunsResponseFull {
+    workflow_runs: Vec<GhRunFull>,
+}
+
+#[derive(Deserialize)]
 struct GhRun {
     id: u64,
     name: String,
+    status: String,
+    conclusion: Option<String>,
+    html_url: String,
+}
+
+#[derive(Deserialize)]
+struct GhRunFull {
+    id: u64,
+    name: String,
+    head_sha: String,
+    head_branch: String,
     status: String,
     conclusion: Option<String>,
     html_url: String,

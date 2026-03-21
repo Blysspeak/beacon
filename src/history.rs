@@ -60,6 +60,26 @@ pub fn read(filter: &HistoryFilter) -> Result<Vec<DeployStatus>> {
     Ok(entries)
 }
 
+/// Get unique repo names from history (for auto-discovery in poller)
+pub fn unique_repos() -> Result<Vec<String>> {
+    let path = history_path()?;
+    if !path.exists() {
+        return Ok(vec![]);
+    }
+
+    let file = fs::File::open(&path)?;
+    let reader = BufReader::new(file);
+
+    let mut seen = std::collections::HashSet::new();
+    for line in reader.lines().flatten() {
+        if let Ok(entry) = serde_json::from_str::<DeployStatus>(&line) {
+            seen.insert(entry.repo);
+        }
+    }
+
+    Ok(seen.into_iter().collect())
+}
+
 /// Read recent deploys grouped by repo (for waybar)
 pub fn recent_by_repo(minutes: u64) -> Result<Vec<DeployStatus>> {
     let path = history_path()?;

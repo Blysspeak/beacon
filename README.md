@@ -18,8 +18,8 @@
 </p>
 
 <p align="center">
-  <em>Persistent daemon that monitors CI/CD after every <code>git push</code>.<br>
-  Telegram alerts · Waybar widget · Claude Code integration · Zero config.</em>
+  <em>Persistent daemon that auto-discovers your repos and monitors every CI/CD deploy.<br>
+  GitHub polling · Telegram alerts · Waybar widget · Claude Code integration · Zero config.</em>
 </p>
 
 ---
@@ -33,10 +33,12 @@ You `git push`, switch tasks, and the deploy **silently fails**. You keep coding
 ### The Fix
 
 ```
-git push → Beacon daemon catches it → polls GitHub Actions →
+Push from anywhere → Beacon daemon detects it → polls GitHub Actions →
   ✅ Success → Telegram + Waybar green → keep working
   ❌ Failed  → Telegram + Waybar red → Claude Code stops and warns you
 ```
+
+No hooks to install per-repo. No config. Beacon auto-discovers repos from your deploy history and polls GitHub every 60s.
 
 ---
 
@@ -68,27 +70,32 @@ cargo install beacon && beacon install
 ## How It Works
 
 ```
-                    ┌──────────────────────────┐
-                    │   beacon daemon (systemd) │
-                    │   always running           │
-                    └─────────┬────────────────┘
-                              │
-       ┌──────────────────────┼──────────────────────┐
-       ↓                      ↓                      ↓
-  📁 Mailbox            📱 Telegram           📊 Waybar
-  last_deploy.json      instant alert         SIGRTMIN+8
-       ↓
-  🤖 Claude Code
-  "DEPLOY FAILED — fix it
-   before continuing"
+                    ┌──────────────────────────────┐
+                    │    beacon daemon (systemd)    │
+                    │    always running              │
+                    └──────────┬───────────────────┘
+                               │
+           ┌───────────────────┼───────────────────┐
+           ↓                   ↓                   ↓
+     GitHub Poller       Queue Watcher        Notifications
+     (every 60s)         (hooks, instant)          │
+           │                   │          ┌────────┼────────┐
+           └─────────┬─────────┘          ↓        ↓        ↓
+                     ↓               📱 Telegram  📊 Waybar  🤖 Claude
+              Track workflow                                   Code
 ```
 
-**Push → Queue → Daemon → Track → Notify.** That's it.
+**Two detection modes — zero config:**
+
+| Mode | Latency | How it works |
+|------|---------|-------------|
+| **GitHub Poller** | ~60s | Daemon polls GitHub Actions for all auto-discovered repos |
+| **Hook (Claude Code)** | instant | PostToolUse hook catches `git push` in Claude sessions |
 
 | Step | What happens |
 |------|-------------|
-| You push | Hook writes `~/.beacon/queue/123.json` (< 10ms) |
-| Daemon sees it | Starts polling GitHub Actions for that commit |
+| Push from anywhere | Poller detects new workflow run within 60s |
+| Push via Claude Code | Hook enqueues immediately (< 10ms) |
 | Deploy completes | Writes result, sends Telegram, updates Waybar |
 | Deploy **failed** | Claude Code sees warning before next action |
 
@@ -130,6 +137,17 @@ Real-time in your status bar. No polling — instant signal.
 
 Click → opens GitHub Actions run. Tooltip shows full details.
 
+### GitHub Polling (Auto-Discovery)
+
+Beacon automatically discovers repos from your deploy history and polls GitHub Actions for new workflow runs. Push from terminal, IDE, GitHub web — Beacon catches it.
+
+```bash
+beacon poll list                  # see watched repos
+beacon poll add owner/repo        # add repo manually
+beacon poll remove owner/repo     # remove repo
+beacon poll interval 30           # poll every 30s (default 60s)
+```
+
 ### Persistent Daemon
 
 Runs as a systemd user service. Always on, auto-restarts.
@@ -146,13 +164,19 @@ journalctl --user -u beacon -f     # live logs
 | Command | Description |
 |---------|-------------|
 | `beacon push [args]` | `git push` + queue for monitoring |
-| `beacon notify` | Enqueue current repo for daemon (used by hooks) |
-| `beacon watch` | Manual foreground monitor with spinner |
 | `beacon status` | Last deploy result |
 | `beacon status --json` | Machine-readable output |
-| `beacon daemon` | Run daemon (managed by systemd) |
+| `beacon log` | Deploy history |
+| `beacon tui` | Interactive deploy dashboard |
+| `beacon poll list` | Show watched repos (configured + auto-discovered) |
+| `beacon poll add <repo>` | Add repo to watch list |
+| `beacon poll remove <repo>` | Remove repo from watch list |
+| `beacon poll interval <sec>` | Set poll interval (min 10s) |
 | `beacon remote connect` | Connect Telegram |
 | `beacon remote test` | Test Telegram |
+| `beacon watch` | Manual foreground monitor |
+| `beacon notify` | Enqueue current repo (used by hooks) |
+| `beacon daemon` | Run daemon (managed by systemd) |
 | `beacon install` | Setup hooks + daemon |
 | `beacon uninstall` | Remove everything |
 
@@ -160,8 +184,9 @@ journalctl --user -u beacon -f     # live logs
 
 ```
 ~/.beacon/
-├── config.json        # Telegram token + API URL
-├── last_deploy.json   # Last deploy status
+├── config.json        # Telegram + poll config
+├── last_deploy.json   # Last deploy status (mailbox)
+├── history.jsonl      # Full deploy history
 ├── queue/             # Push events for daemon (file-based IPC)
 └── daemon.log         # Daemon logs (if not using systemd)
 ```
@@ -179,10 +204,11 @@ journalctl --user -u beacon -f     # live logs
 - [x] Waybar widget with instant signal refresh
 - [x] Persistent systemd daemon
 - [x] Interactive installer with ASCII banner
+- [x] `beacon log` — deploy history
+- [x] Interactive TUI dashboard
+- [x] GitHub polling with auto-discovery (no per-repo setup)
 - [ ] Railway / Vercel / Fly.io providers
-- [ ] Multi-repo dashboard
 - [ ] Webhook mode (replace polling)
-- [ ] `beacon log` — deploy history
 
 ## Contributing
 

@@ -1,11 +1,11 @@
 [package]
 name = "beacon"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
-description = "CLI tool that monitors CI/CD deploy status after git push and sends Telegram notifications"
+description = "Persistent CI/CD deploy monitor — auto-discovers repos, polls GitHub Actions, alerts via Telegram/Waybar/Claude Code"
 license = "MIT"
 repository = "https://github.com/Blysspeak/beacon"
-keywords = ["ci", "cd", "deploy", "monitor", "telegram"]
+keywords = ["ci", "cd", "deploy", "monitor", "github-actions"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
